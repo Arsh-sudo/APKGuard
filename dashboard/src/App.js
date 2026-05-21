@@ -441,7 +441,7 @@ export default function App() {
       } catch {}
     }, 1500);
     return () => clearInterval(iv);
-  }, [activeJob?.job_id, refresh]);
+  }, [activeJob?.job_id, refresh, activeJob]);
 
   // ── Upload handler ──────────────────────────────────────────────
   const handleUpload = async (file) => {
