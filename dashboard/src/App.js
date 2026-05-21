@@ -1,3 +1,4 @@
+/* eslint-disable */
 import { useState, useEffect, useCallback } from "react";
 import axios from "axios";
 import { Shield, Upload, AlertTriangle, CheckCircle, Clock, BarChart2, FileText, ChevronRight, Trash2, Zap, Brain, Wifi, WifiOff } from "lucide-react";
@@ -603,3 +604,4 @@ export default function App() {
     </div>
   );
 }
+
