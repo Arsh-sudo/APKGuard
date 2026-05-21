@@ -103,6 +103,45 @@ const DEMO_STATS = {
   suspicious: 0, low_risk: 1, avg_score: 63.7, with_llm: 1,
 };
 
+const DEMO_DETAIL_CALC = {
+  apk_name: "Calculator.apk",
+  apk_size_kb: 6571.1,
+  analysed_at: "2026-05-20T22:19:42",
+  manifest: {
+    package: "com.google.android.calculator",
+    version_name: "8.1",
+    activities_count: 2,
+    services_count: 0,
+    receivers_count: 1,
+    dangerous_permissions: [],
+    permissions: ["android.permission.INTERNET","android.permission.WAKE_LOCK"],
+  },
+  static_analysis: {
+    total_java_files: 3538,
+    obfuscation_flag: false,
+    suspicious_keywords: { Base64: 8, DES: 19, overlay: 4, getRuntime: 4 },
+    hardcoded_urls: [],
+    hardcoded_ips: [],
+  },
+  heuristic_scoring: {
+    heuristic_score: 67,
+    category: "HIGH RISK",
+    reasons: [
+      "Suspicious code: Base64 found in 8 file(s) (+3)",
+      "Suspicious code: DES found in 19 file(s) (+3)",
+      "Suspicious code: getRuntime found in 4 file(s) (+10)",
+    ],
+  },
+  ml_scoring: { ml_score: 1.1, final_score: 27.5, category: "LOW RISK" },
+  llm_analysis: {
+    model: "llama3.2",
+    threat_summary: "VERDICT: This app is SAFE — Google Calculator.\nTHREAT TYPE: Legitimate App\nKEY RISKS:\n• Base64/DES in standard libraries only\n• No dangerous permissions\n• ML correctly identifies as benign\nRECOMMENDED ACTION: Safe to allow",
+    permission_analysis: "No dangerous permissions declared — very low risk.",
+    code_analysis: "Base64 and DES keywords appear in standard Android libraries. No malicious intent detected.",
+    plain_explanation: "This is Google Calculator. Score 27.5/100 confirms it is safe.",
+  },
+};
+
 const DEMO_DETAIL = {
   apk_name: "BankingTrojan.apk",
   apk_size_kb: 312.4,
@@ -441,7 +480,7 @@ export default function App() {
       } catch {}
     }, 1500);
     return () => clearInterval(iv);
-  }, [activeJob?.job_id, refresh, activeJob]);
+  }, [activeJob?.job_id, refresh]);
 
   // ── Upload handler ──────────────────────────────────────────────
   const handleUpload = async (file) => {
@@ -468,7 +507,11 @@ export default function App() {
 
   const handleRowClick = (item) => {
     if (!apiOnline) {
-      setSelected(DEMO_DETAIL);
+      if (item.apk_name === "Calculator.apk") {
+        setSelected(DEMO_DETAIL_CALC);
+      } else {
+        setSelected(DEMO_DETAIL);
+      }
       return;
     }
     axios.get(`${API}/report/${item.apk_name?.replace(".apk","")}`)
