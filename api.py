@@ -5,9 +5,12 @@ The React dashboard calls these endpoints.
 """
 
 import json
+import os
+import re
 import shutil
 import sys
 import asyncio
+import uuid
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
@@ -17,14 +20,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 # ── Add APKGuard root to path so we can import our modules ────────────────────
-sys.path.insert(0, str(Path("C:/APKGuard")))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from decompiler import analyse_apk
 from classifier import load_model, score_apk
 from llm_explainer import explain_apk
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-BASE_DIR    = Path("C:/APKGuard")
+BASE_DIR    = Path(os.getenv("APKGUARD_HOME", Path(__file__).resolve().parent))
 UPLOADS_DIR = BASE_DIR / "uploads"
 OUTPUT_DIR  = BASE_DIR / "output"
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)

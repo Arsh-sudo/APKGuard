@@ -5,6 +5,7 @@ generate human-readable threat explanations for bank security teams.
 """
 
 import json
+import os
 import sys
 import re
 import requests
@@ -12,10 +13,11 @@ from pathlib import Path
 from datetime import datetime
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-BASE_DIR       = Path("C:/APKGuard")
+BASE_DIR       = Path(os.getenv("APKGUARD_HOME", Path(__file__).resolve().parent))
 OUTPUT_DIR     = BASE_DIR / "output"
-OLLAMA_URL     = "http://localhost:11434/api/generate"
-OLLAMA_MODEL   = "llama3.2"
+OLLAMA_HOST    = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/")
+OLLAMA_URL     = f"{OLLAMA_HOST}/api/generate"
+OLLAMA_MODEL   = os.getenv("OLLAMA_MODEL", "llama3.2")
 MAX_CODE_CHARS = 6000   # chars of code to send per LLM call (context limit)
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -254,7 +256,7 @@ def explain_apk(apk_name: str):
 
     # ── Check Ollama is running ───────────────────────────────────
     try:
-        ping = requests.get("http://localhost:11434", timeout=5)
+        requests.get(OLLAMA_HOST, timeout=5)
         log("Ollama is running", "OK")
     except Exception:
         log("Ollama is not running! Open a new terminal and run: ollama serve", "ERR")

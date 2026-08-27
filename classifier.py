@@ -14,7 +14,7 @@ from pathlib import Path
 from datetime import datetime
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-BASE_DIR    = Path("C:/APKGuard")
+BASE_DIR    = Path(os.getenv("APKGUARD_HOME", Path(__file__).resolve().parent))
 DATA_DIR    = BASE_DIR / "data"
 MODELS_DIR  = BASE_DIR / "models"
 OUTPUT_DIR  = BASE_DIR / "output"
