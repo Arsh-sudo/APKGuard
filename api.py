@@ -32,6 +32,21 @@ UPLOADS_DIR = BASE_DIR / "uploads"
 OUTPUT_DIR  = BASE_DIR / "output"
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+# ── Path safety ───────────────────────────────────────────────────────────────
+# apk_name arrives from the URL and from upload filenames, both attacker
+# controlled. Without this, DELETE /report/.. resolves to BASE_DIR and
+# shutil.rmtree deletes the entire application.
+SAFE_NAME = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
+
+
+def safe_output_dir(apk_name: str) -> Path:
+    """Resolve an APK name to a directory strictly inside OUTPUT_DIR."""
+    if apk_name in (".", "..") or not SAFE_NAME.match(apk_name):
+        raise HTTPException(status_code=400, detail="Invalid APK name")
+    target = (OUTPUT_DIR / apk_name).resolve()
+    if not target.is_relative_to(OUTPUT_DIR.resolve()):
+        raise HTTPException(status_code=400, detail="Invalid APK name")
+    return target
 
 # ── In-memory job store (resets on restart — fine for demo) ──────────────────
 # job_id → { status, progress, result, error }
@@ -156,26 +171,48 @@ async def analyse(
     Upload an APK file and start the full analysis pipeline.
     Returns a job_id to poll for results.
     """
-    # Validate file type
-    if not file.filename.endswith(".apk"):
+    MAX_BYTES = 100 * 1024 * 1024
+
+    # Never trust the client's filename — it is an attacker-controlled header.
+    # Path.name strips any directory component before we look at it.
+    original_name = Path(file.filename or "").name
+    if Path(original_name).suffix.lower() != ".apk":
         raise HTTPException(status_code=400, detail="Only .apk files are accepted")
 
-    # Validate file size (max 100MB)
-    contents = await file.read()
-    if len(contents) > 100 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="File too large (max 100MB)")
+    # Use the client's stem only if it is safe; otherwise generate our own.
+    stem = Path(original_name).stem
+    apk_name = stem if SAFE_NAME.match(stem) else uuid.uuid4().hex
+    apk_path = UPLOADS_DIR / f"{apk_name}.apk"
 
-    # Save APK to uploads folder
-    apk_name  = Path(file.filename).stem   # e.g. "Calculator"
-    apk_path  = UPLOADS_DIR / file.filename
-    with open(apk_path, "wb") as f:
-        f.write(contents)
+    # Stream to disk and abort the moment the cap is exceeded. Reading the whole
+    # body into memory first meant a 4GB upload exhausted RAM before the old
+    # size check ever ran.
+    try:
+        written = 0
+        with open(apk_path, "wb") as f:
+            while chunk := await file.read(1024 * 1024):
+                written += len(chunk)
+                if written > MAX_BYTES:
+                    raise HTTPException(status_code=400,
+                                        detail="File too large (max 100MB)")
+                f.write(chunk)
 
-    # Create job
-    job_id = f"{apk_name}_{datetime.now().strftime('%H%M%S')}"
+        # An APK is a ZIP. Validate the content, not just the extension.
+        with open(apk_path, "rb") as f:
+            if f.read(4) != b"PK\x03\x04":
+                raise HTTPException(status_code=400,
+                                    detail="Not a valid APK (bad ZIP header)")
+    except HTTPException:
+        apk_path.unlink(missing_ok=True)
+        raise
+
+    # Create job. UUID rather than name+timestamp: two uploads of the same
+    # filename in the same second used to collide and overwrite each other.
+    job_id = uuid.uuid4().hex[:12]
     jobs[job_id] = {
         "job_id":     job_id,
-        "apk_name":   file.filename,
+        "apk_name":      apk_name,
+        "original_name": original_name,
         "status":     "queued",
         "progress":   0,
         "message":    "Queued for analysis",
@@ -216,7 +253,7 @@ def list_jobs():
 @app.get("/report/{apk_name}")
 def get_report(apk_name: str):
     """Get the full report for a previously analysed APK."""
-    report_path = OUTPUT_DIR / apk_name / "report.json"
+    report_path = safe_output_dir(apk_name) / "report.json"
     if not report_path.exists():
         raise HTTPException(status_code=404, detail=f"No report found for {apk_name}")
     with open(report_path, "r", encoding="utf-8") as f:
@@ -286,7 +323,7 @@ def stats():
 @app.delete("/report/{apk_name}")
 def delete_report(apk_name: str):
     """Delete an APK's analysis output."""
-    folder = OUTPUT_DIR / apk_name
+    folder = safe_output_dir(apk_name)
     if not folder.exists():
         raise HTTPException(status_code=404, detail=f"No report found for {apk_name}")
     shutil.rmtree(folder)
