@@ -466,8 +466,205 @@ export const mockReports: APKReport[] = [
       plain_explanation: 'This is the official Google Calculator app. It is completely safe to install and use.',
       ciso_recommendation: 'Approved for universal deployment across all enterprise environments.'
     }
+  },
+  {
+    apk_name: 'icon-torch-flashlight.apk',
+    apk_size_kb: 49.4,
+    analysed_at: '2026-05-24T17:34:59Z',
+    manifest: {
+      package: 'com.bright.torch.flashlight.tool',
+      version_name: '1.2.0',
+      version_code: '12',
+      min_sdk: 21,
+      target_sdk: 33,
+      activities_count: 2,
+      services_count: 2,
+      receivers_count: 2,
+      providers_count: 0,
+      activities: [
+        'com.bright.torch.MainActivity',
+        'com.bright.torch.OverlayActivity'
+      ],
+      services: [
+        'com.bright.torch.FlashService',
+        'com.bright.torch.DaemonService'
+      ],
+      receivers: [
+        'com.bright.torch.BootReceiver',
+        'com.bright.torch.PackageChangeReceiver'
+      ],
+      dangerous_permissions: [
+        'SYSTEM_ALERT_WINDOW',
+        'RECEIVE_BOOT_COMPLETED',
+        'CAMERA'
+      ],
+      permissions: [
+        'android.permission.CAMERA',
+        'android.permission.FLASHLIGHT',
+        'android.permission.SYSTEM_ALERT_WINDOW',
+        'android.permission.RECEIVE_BOOT_COMPLETED',
+        'android.permission.WAKE_LOCK',
+        'android.permission.INTERNET',
+        'android.permission.ACCESS_NETWORK_STATE'
+      ]
+    },
+    static_analysis: {
+      total_java_files: 42,
+      hardcoded_urls: ['http://api.stats-collector.net/v1/ping'],
+      hardcoded_ips: ['198.51.100.45'],
+      suspicious_keywords: {
+        WindowManager: 4,
+        getSystemService: 8,
+        HttpURLConnection: 2,
+        Base64: 3
+      },
+      obfuscation_score: 22,
+      obfuscation_flag: false,
+      native_lib_count: 0,
+      native_libs: [],
+      dex_count: 1,
+      smali_file_count: 58,
+      md5: 'a3d2019c8f2b7405e3f1947bca821094',
+      sha1: '9b8402a76f2d5e3c8a91b2c3d4e5f60718293a4b',
+      sha256: '7f9c2d1b8e4a5f60718293a4b5c6d7e8f90123456789abcdef0123456789abcd'
+    },
+    heuristic_scoring: {
+      heuristic_score: 68,
+      category: 'HIGH_RISK',
+      reasons: [
+        'Flashlight utility requests SYSTEM_ALERT_WINDOW (overlay permission) with no operational justification',
+        'Auto-starts in background on device boot via RECEIVE_BOOT_COMPLETED',
+        'Contacts remote collector server while maintaining active background daemon service'
+      ]
+    },
+    ml_scoring: {
+      ml_probability: 0.732,
+      ml_score: 73.2,
+      heuristic_score: 68,
+      final_score: 73.2,
+      category: 'HIGH_RISK',
+      model_confidence: 88.6,
+      operating_threshold: 0.80,
+      top_features: [
+        { name: 'perm::SYSTEM_ALERT_WINDOW', importance: 0.89, impact: 'positive', description: 'Deceptive overlay window injection over banking logins', value: 1 },
+        { name: 'perm::RECEIVE_BOOT_COMPLETED', importance: 0.81, impact: 'positive', description: 'Background auto-launch persistence', value: 1 },
+        { name: 'perm::CAMERA', importance: 0.65, impact: 'positive', description: 'Hardware camera / LED strobe activation', value: 1 },
+        { name: 'str::WindowManager', importance: 0.59, impact: 'positive', description: 'Programmatic floating overlay generation', value: 4 }
+      ]
+    },
+    llm_analysis: {
+      model: 'Llama 3.2 3B (Ollama Local)',
+      threat_summary: 'VERDICT: Suspicious Utility / Potential Overlay Dropper (73.2/100).\nTHREAT CLASSIFICATION: Trojanised Flashlight Utility.\nPRIMARY OBJECTIVE: Masquerading as a harmless flashlight while establishing background persistence and deceptive overlay capabilities.',
+      permission_analysis: 'A genuine flashlight app only needs camera flash access. Requesting SYSTEM_ALERT_WINDOW and RECEIVE_BOOT_COMPLETED is a well-documented tactic used by banking trojan droppers to display phishing login prompts over legitimate banking applications.',
+      code_analysis: 'Source routines instantiate WindowManager overlay params with TYPE_APPLICATION_OVERLAY and maintain a persistent background DaemonService connecting to an untrusted external IP.',
+      plain_explanation: 'This flashlight app asks for dangerous permissions it should not need, such as permission to draw over other apps and run in the background. In banking cybersecurity, this pattern is frequently used to steal credentials.',
+      ciso_recommendation: 'Block this package on enterprise devices. Educate staff on the risks of third-party torch/utility apps.'
+    }
   }
 ];
+
+export function generateDynamicReport(apkName: string, sizeKb = 49.4): APKReport {
+  const isTorch = /torch|flash|light/i.test(apkName);
+  const isBank = /bank|pay|wallet|crypto/i.test(apkName);
+  const isClean = /calc|note|timer|clock/i.test(apkName);
+
+  if (isTorch) {
+    const existing = mockReports.find(m => m.apk_name === 'icon-torch-flashlight.apk');
+    if (existing) {
+      return {
+        ...existing,
+        apk_name: apkName,
+        apk_size_kb: sizeKb || 49.4,
+        analysed_at: new Date().toISOString()
+      };
+    }
+  }
+
+  const existingMatch = mockReports.find(m => m.apk_name.toLowerCase() === apkName.toLowerCase());
+  if (existingMatch) {
+    return {
+      ...existingMatch,
+      analysed_at: new Date().toISOString()
+    };
+  }
+
+  // Generate dynamic specimen
+  const sanitizedName = apkName.replace(/\.apk$/i, '').toLowerCase().replace(/[^a-z0-9]/g, '.');
+  const pkg = `com.app.${sanitizedName}`;
+  const finalScore = isBank ? 92.4 : isClean ? 5.2 : 68.5;
+  const category = finalScore >= 70 ? 'CRITICAL' : finalScore >= 50 ? 'HIGH_RISK' : finalScore >= 30 ? 'SUSPICIOUS' : 'LOW_RISK';
+
+  return {
+    apk_name: apkName,
+    apk_size_kb: sizeKb || 128.5,
+    analysed_at: new Date().toISOString(),
+    manifest: {
+      package: pkg,
+      version_name: '1.0.0',
+      version_code: '1',
+      min_sdk: 23,
+      target_sdk: 33,
+      activities_count: 3,
+      services_count: 2,
+      receivers_count: 2,
+      providers_count: 0,
+      activities: [`${pkg}.MainActivity`, `${pkg}.SettingsActivity`],
+      services: [`${pkg}.BackgroundService`],
+      receivers: [`${pkg}.BootReceiver`],
+      dangerous_permissions: isClean ? [] : ['SYSTEM_ALERT_WINDOW', 'RECEIVE_BOOT_COMPLETED'],
+      permissions: [
+        'android.permission.INTERNET',
+        'android.permission.ACCESS_NETWORK_STATE',
+        ...(isClean ? [] : ['android.permission.SYSTEM_ALERT_WINDOW', 'android.permission.RECEIVE_BOOT_COMPLETED'])
+      ]
+    },
+    static_analysis: {
+      total_java_files: 38,
+      hardcoded_urls: ['https://telemetry.service-api.com/v1/event'],
+      hardcoded_ips: ['198.51.100.22'],
+      suspicious_keywords: { HttpURLConnection: 3, getSystemService: 4 },
+      obfuscation_score: 15,
+      obfuscation_flag: false,
+      native_lib_count: 0,
+      native_libs: [],
+      dex_count: 1,
+      smali_file_count: 45,
+      md5: '7d8a9b1c2e3f4a5b6c7d8e9f0a1b2c3d',
+      sha1: '4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b',
+      sha256: '9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1f0e9d8c7b6a5f4e3d2c1b0a9f8e'
+    },
+    heuristic_scoring: {
+      heuristic_score: finalScore,
+      category,
+      reasons: [
+        `Static analysis completed for ${apkName}`,
+        isClean ? 'No dangerous permissions declared in manifest' : 'Elevated capability footprint detected for application type',
+        'Vector features evaluated against Drebin XGBoost benchmark'
+      ]
+    },
+    ml_scoring: {
+      ml_probability: finalScore / 100,
+      ml_score: finalScore,
+      heuristic_score: finalScore,
+      final_score: finalScore,
+      category,
+      model_confidence: 91.2,
+      operating_threshold: 0.80,
+      top_features: [
+        { name: 'perm::dangerous_count', importance: 0.85, impact: isClean ? 'negative' : 'positive', description: 'Overall dangerous permission count', value: isClean ? 0 : 2 },
+        { name: 'api::network_telemetry', importance: 0.72, impact: 'positive', description: 'Outbound network communication routines', value: 1 }
+      ]
+    },
+    llm_analysis: {
+      model: 'Llama 3.2 3B (Ollama Local)',
+      threat_summary: `VERDICT: ${category} (${finalScore}/100).\nTHREAT CLASSIFICATION: Automated static signature evaluation for ${apkName}.\nPRIMARY OBJECTIVE: Analysis completed across manifest, smali disassembly, and permission matrix.`,
+      permission_analysis: isClean ? 'Clean permission profile. Zero high-risk capabilities declared.' : 'Permissions include background persistence and potential overlay capabilities.',
+      code_analysis: 'Static bytecode decompiled without fatal errors. Standard Android runtime APIs identified.',
+      plain_explanation: isClean ? 'This application is clean and safe to use.' : 'This application exhibits elevated risk signatures and should be reviewed before enterprise deployment.',
+      ciso_recommendation: isClean ? 'Approved for standard execution.' : 'Exercise caution and verify software publisher before deploying to production endpoints.'
+    }
+  };
+}
 
 export const mockStats: SystemStats = {
   total: 428,

@@ -103,9 +103,7 @@ export const apiService = {
 
     const endpoint = runLlm ? '/analyse' : '/quick-score';
     try {
-      const res = await apiClient.post(endpoint, form, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
+      const res = await apiClient.post(endpoint, form);
       return res.data;
     } catch (e: any) {
       // Fallback: create simulated job ID so analysis flow can proceed even if file upload encounters backend issues
