@@ -28,9 +28,20 @@ app.use(
 
 app.use(express.json());
 
-// In-memory data stores
-const reportsStore = new Map<string, APKReport>();
-const jobsStore = new Map<
+// In-memory data stores (cached in global scope across serverless lambdas)
+const g = global as any;
+if (!g.__reportsStore) {
+  g.__reportsStore = new Map<string, APKReport>();
+  for (const report of mockReports) {
+    g.__reportsStore.set(report.apk_name, report as any);
+  }
+}
+if (!g.__jobsStore) {
+  g.__jobsStore = new Map<string, any>();
+}
+
+const reportsStore: Map<string, APKReport> = g.__reportsStore;
+const jobsStore: Map<
   string,
   {
     job_id: string;
@@ -46,12 +57,7 @@ const jobsStore = new Map<
     created_at: string;
     updated_at: string;
   }
->();
-
-// Seed initial reports with standardized categories
-for (const report of mockReports) {
-  reportsStore.set(report.apk_name, report as any);
-}
+> = g.__jobsStore;
 
 // Pre-seeded comprehensive specimen dossiers for instant triage
 const seedBankingTrojan: APKReport = {
@@ -609,7 +615,7 @@ async function runAnalysisPipeline(
 }
 
 // Upload & Analyze endpoints — BOTH /analyse and /api/analyse are mounted
-const handleAnalyse = (req: Request, res: Response) => {
+const handleAnalyse = async (req: Request, res: Response) => {
   if (!req.file) {
     return res.status(400).json({ detail: "No file uploaded" });
   }
@@ -657,7 +663,19 @@ const handleAnalyse = (req: Request, res: Response) => {
     updated_at: new Date().toISOString(),
   });
 
-  // Run pipeline asynchronously
+  // In serverless environments (like Vercel), await pipeline execution before lambda freeze
+  if (process.env.VERCEL) {
+    await runAnalysisPipeline(jobId, buffer, originalName, originalName, runLlm);
+    const completedJob = jobsStore.get(jobId);
+    return res.json({
+      job_id: jobId,
+      message: "Analysis complete",
+      poll_url: `/job/${jobId}`,
+      result: completedJob?.result || reportsStore.get(originalName) || null,
+    });
+  }
+
+  // Run pipeline asynchronously in standard server environments
   runAnalysisPipeline(jobId, buffer, originalName, originalName, runLlm);
 
   res.json({
@@ -670,7 +688,7 @@ const handleAnalyse = (req: Request, res: Response) => {
 app.post("/analyse", rateLimiter, upload.single("file"), handleAnalyse);
 app.post("/api/analyse", rateLimiter, upload.single("file"), handleAnalyse);
 
-const handleQuickScore = (req: Request, res: Response) => {
+const handleQuickScore = async (req: Request, res: Response) => {
   if (!req.file) {
     return res.status(400).json({ detail: "No file uploaded" });
   }
@@ -715,6 +733,17 @@ const handleQuickScore = (req: Request, res: Response) => {
     updated_at: new Date().toISOString(),
   });
 
+  if (process.env.VERCEL) {
+    await runAnalysisPipeline(jobId, buffer, originalName, originalName, false);
+    const completedJob = jobsStore.get(jobId);
+    return res.json({
+      job_id: jobId,
+      message: "Quick score complete",
+      poll_url: `/job/${jobId}`,
+      result: completedJob?.result || reportsStore.get(originalName) || null,
+    });
+  }
+
   runAnalysisPipeline(jobId, buffer, originalName, originalName, false);
 
   res.json({
@@ -729,6 +758,11 @@ app.post("/api/quick-score", rateLimiter, upload.single("file"), handleQuickScor
 
 // ========== 2. VITE / STATIC LAST ==========
 async function startServer() {
+  if (process.env.VERCEL) {
+    // In Vercel serverless environment, the platform handles HTTP routing
+    return;
+  }
+
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -750,4 +784,9 @@ async function startServer() {
   });
 }
 
-startServer();
+if (!process.env.VERCEL) {
+  startServer();
+}
+
+export { app };
+export default app;
