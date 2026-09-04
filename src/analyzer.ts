@@ -675,7 +675,14 @@ export async function generateLLMReport(
 
   if (apiKey) {
     try {
-      const ai = new GoogleGenAI({ apiKey });
+      const ai = new GoogleGenAI({
+        apiKey,
+        httpOptions: {
+          headers: {
+            "User-Agent": "aistudio-build",
+          },
+        },
+      });
       const prompt = `You are an automated Android malware analysis engine working for a commercial bank's CISO security triage unit.
 
 SECURITY NOTICE:
@@ -708,23 +715,46 @@ Respond strictly in valid JSON format matching this schema:
   "ciso_recommendation": "Executive governance guidance."
 }`;
 
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("Gemini generation timed out")), 4800)
-      );
+      // 30-second timeout to allow complete structured generation without false timeouts
+      let timeoutHandle: NodeJS.Timeout | null = null;
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutHandle = setTimeout(() => reject(new Error("Gemini generation timed out")), 30000);
+      });
 
-      const response = (await Promise.race([
-        ai.models.generateContent({
-          model: "gemini-2.5-flash",
-          contents: prompt,
-          config: {
-            responseMimeType: "application/json",
-          }
-        }),
-        timeoutPromise
-      ])) as any;
+      // Try primary model (gemini-2.5-flash) with fallback to gemini-3.8-flash if primary encounters temporary issues
+      const executeGeneration = async () => {
+        try {
+          return await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: prompt,
+            config: {
+              responseMimeType: "application/json",
+            },
+          });
+        } catch (firstErr: any) {
+          console.warn("Primary gemini-2.5-flash encountered error, trying alternate:", firstErr?.message);
+          return await ai.models.generateContent({
+            model: "gemini-3.8-flash",
+            contents: prompt,
+            config: {
+              responseMimeType: "application/json",
+            },
+          });
+        }
+      };
 
-      const text = response.text || "{}";
-      const parsed = JSON.parse(text);
+      const response = await Promise.race([
+        executeGeneration(),
+        timeoutPromise,
+      ]);
+
+      if (timeoutHandle) {
+        clearTimeout(timeoutHandle);
+      }
+
+      let rawText = response.text || "{}";
+      rawText = rawText.trim().replace(/^```(?:json)?\s*/i, "").replace(/```$/i, "").trim();
+      const parsed = JSON.parse(rawText);
 
       if (parsed.executive_summary || parsed.threat_summary) {
         return {

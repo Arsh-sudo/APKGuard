@@ -381,24 +381,20 @@ const rateLimiter = (() => {
   };
 })();
 
-// API Routes
-app.get("/api/health", (req: Request, res: Response) => {
+// ========== 1. API ROUTES FIRST ==========
+// Health
+const handleHealth = (req: Request, res: Response) => {
   res.json({
     api: "ok",
     model: "loaded",
     timestamp: new Date().toISOString(),
   });
-});
+};
+app.get("/api/health", handleHealth);
+app.get("/health", handleHealth);
 
-app.get("/health", (req: Request, res: Response) => {
-  res.json({
-    api: "ok",
-    model: "loaded",
-    timestamp: new Date().toISOString(),
-  });
-});
-
-app.get("/stats", (req: Request, res: Response) => {
+// Stats
+const handleStats = (req: Request, res: Response) => {
   const allReports = Array.from(reportsStore.values());
   const total = allReports.length;
   if (total === 0) {
@@ -425,16 +421,20 @@ app.get("/stats", (req: Request, res: Response) => {
     avg_score: avgScore,
     with_llm: allReports.filter((r) => r.llm_analysis !== null).length,
   });
-});
+};
+app.get("/stats", handleStats);
+app.get("/api/stats", handleStats);
 
-// Return complete reports directly to eliminate 30-request thundering herd
-app.get("/reports", (req: Request, res: Response) => {
+// Reports
+const handleReports = (req: Request, res: Response) => {
   const allReports = Array.from(reportsStore.values());
   allReports.sort((a, b) => (b.analysed_at || "").localeCompare(a.analysed_at || ""));
   res.json(allReports);
-});
+};
+app.get("/reports", handleReports);
+app.get("/api/reports", handleReports);
 
-app.get("/report/:apk_name", (req: Request, res: Response) => {
+const handleGetReport = (req: Request, res: Response) => {
   const apkParam = String(req.params.apk_name || "");
   const name = apkParam.endsWith(".apk") ? apkParam : `${apkParam}.apk`;
   const report = reportsStore.get(name) || reportsStore.get(apkParam);
@@ -443,22 +443,29 @@ app.get("/report/:apk_name", (req: Request, res: Response) => {
     return res.status(404).json({ detail: `No report found for ${apkParam}` });
   }
   res.json(report);
-});
+};
+app.get("/report/:apk_name", handleGetReport);
+app.get("/api/report/:apk_name", handleGetReport);
 
-app.delete("/report/:apk_name", (req: Request, res: Response) => {
+const handleDeleteReport = (req: Request, res: Response) => {
   const apkParam = String(req.params.apk_name || "");
   const name = apkParam.endsWith(".apk") ? apkParam : `${apkParam}.apk`;
   reportsStore.delete(name);
   reportsStore.delete(apkParam);
   res.json({ message: `Report for ${apkParam} deleted` });
-});
+};
+app.delete("/report/:apk_name", handleDeleteReport);
+app.delete("/api/report/:apk_name", handleDeleteReport);
 
-app.get("/jobs", (req: Request, res: Response) => {
+// Jobs
+const handleGetJobs = (req: Request, res: Response) => {
   res.json(Array.from(jobsStore.values()));
-});
+};
+app.get("/jobs", handleGetJobs);
+app.get("/api/jobs", handleGetJobs);
 
 // Strict job polling — returns genuine 404 if job does not exist
-app.get("/job/:job_id", (req: Request, res: Response) => {
+const handleGetJob = (req: Request, res: Response) => {
   const jobId = String(req.params.job_id || "");
   const job = jobsStore.get(jobId);
 
@@ -466,9 +473,11 @@ app.get("/job/:job_id", (req: Request, res: Response) => {
     return res.status(404).json({ detail: "Job not found" });
   }
   res.json(job);
-});
+};
+app.get("/job/:job_id", handleGetJob);
+app.get("/api/job/:job_id", handleGetJob);
 
-app.post("/job/:job_id/cancel", (req: Request, res: Response) => {
+const handleCancelJob = (req: Request, res: Response) => {
   const jobId = String(req.params.job_id || "");
   const job = jobsStore.get(jobId);
   if (!job) {
@@ -481,7 +490,9 @@ app.post("/job/:job_id/cancel", (req: Request, res: Response) => {
     job.updated_at = new Date().toISOString();
   }
   res.json({ message: "Job cancelled", job });
-});
+};
+app.post("/job/:job_id/cancel", handleCancelJob);
+app.post("/api/job/:job_id/cancel", handleCancelJob);
 
 // Async pipeline handler for APK analysis
 async function runAnalysisPipeline(
@@ -597,8 +608,8 @@ async function runAnalysisPipeline(
   }
 }
 
-// Upload & Analyze endpoints
-app.post("/analyse", rateLimiter, upload.single("file"), (req: Request, res: Response) => {
+// Upload & Analyze endpoints — BOTH /analyse and /api/analyse are mounted
+const handleAnalyse = (req: Request, res: Response) => {
   if (!req.file) {
     return res.status(400).json({ detail: "No file uploaded" });
   }
@@ -654,9 +665,12 @@ app.post("/analyse", rateLimiter, upload.single("file"), (req: Request, res: Res
     message: "Analysis started",
     poll_url: `/job/${jobId}`,
   });
-});
+};
 
-app.post("/quick-score", rateLimiter, upload.single("file"), (req: Request, res: Response) => {
+app.post("/analyse", rateLimiter, upload.single("file"), handleAnalyse);
+app.post("/api/analyse", rateLimiter, upload.single("file"), handleAnalyse);
+
+const handleQuickScore = (req: Request, res: Response) => {
   if (!req.file) {
     return res.status(400).json({ detail: "No file uploaded" });
   }
@@ -708,21 +722,25 @@ app.post("/quick-score", rateLimiter, upload.single("file"), (req: Request, res:
     message: "Quick score started",
     poll_url: `/job/${jobId}`,
   });
-});
+};
 
-// Vite middleware & Production SPA Static Serving
+app.post("/quick-score", rateLimiter, upload.single("file"), handleQuickScore);
+app.post("/api/quick-score", rateLimiter, upload.single("file"), handleQuickScore);
+
+// ========== 2. VITE / STATIC LAST ==========
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
+    // Vite MUST come after API routes
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
-    // Safe universal SPA fallback handler across all Express versions
-    app.use((req: Request, res: Response) => {
+    // SPA fallback — ONLY for production, and ONLY after API routes
+    app.get("*", (req: Request, res: Response) => {
       res.sendFile(path.join(distPath, "index.html"));
     });
   }

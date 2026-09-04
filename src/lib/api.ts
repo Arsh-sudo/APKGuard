@@ -82,11 +82,7 @@ export const apiService = {
 
     const endpoint = runLlm ? '/analyse' : '/quick-score';
     try {
-      const res = await apiClient.post(endpoint, form, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      });
+      const res = await apiClient.post(endpoint, form);
       return res.data;
     } catch (err: any) {
       const msg = err.response?.data?.detail || err.message || 'File upload failed';

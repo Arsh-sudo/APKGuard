@@ -240,6 +240,14 @@ export const UploadZone: React.FC = () => {
             Predatory Loan Extortion (Critical)
           </button>
           <button
+            id="demo-torch-btn"
+            type="button"
+            onClick={() => handleQuickDemo('icon-torch-flashlight.apk')}
+            className="text-[11px] font-mono px-2.5 py-1 rounded bg-orange-500/10 text-orange-300 border border-orange-500/30 hover:bg-orange-500/20 transition-colors"
+          >
+            Torch Flashlight (Overlay Dropper)
+          </button>
+          <button
             id="demo-clean-btn"
             type="button"
             onClick={() => handleQuickDemo('GoogleCalculator-v8.1.apk')}
