@@ -1,9 +1,0 @@
-fastapi==0.136.1
-uvicorn==0.47.0
-python-multipart==0.0.29
-xgboost==3.2.0
-scikit-learn==1.8.0
-pandas==3.0.3
-numpy==2.4.5
-requests==2.34.2
-tqdm==4.67.3

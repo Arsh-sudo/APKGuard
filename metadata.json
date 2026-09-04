@@ -1,0 +1,6 @@
+{
+  "name": "APKGuard",
+  "description": "GenAI-Powered Banking APK Threat Intelligence Platform with static analysis, ML scoring, and LLM explanation.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
