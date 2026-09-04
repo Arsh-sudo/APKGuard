@@ -3,7 +3,7 @@ import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { AnalysisJob, APKReport } from '../types';
 import { apiService } from '../lib/api';
 import { useAppStore } from '../lib/store';
-import { mockReports, generateDynamicReport } from '../lib/mockData';
+import { mockReports } from '../lib/mockData';
 import {
   FileCode,
   Binary,
@@ -16,7 +16,7 @@ import {
   Shield,
   Loader2,
   StopCircle,
-  Clock
+  RotateCcw
 } from 'lucide-react';
 
 export const AnalysisPage: React.FC = () => {
@@ -28,6 +28,7 @@ export const AnalysisPage: React.FC = () => {
   const { activeJob, setActiveJob, addReport, addToast } = useAppStore();
   const [job, setJob] = useState<AnalysisJob | null>(activeJob);
   const [pollError, setPollError] = useState<string | null>(null);
+  const [networkRetries, setNetworkRetries] = useState(0);
   const logsEndRef = useRef<HTMLDivElement | null>(null);
 
   // Auto-scroll logs
@@ -42,18 +43,18 @@ export const AnalysisPage: React.FC = () => {
     let isMounted = true;
     let pollInterval: any = null;
 
-    // Handle mock demo specimens
+    // Handle local demo specimens
     if (jobId.startsWith('demo_') && sampleParam) {
       const specimen = mockReports.find(m => m.apk_name.toLowerCase().includes(sampleParam.toLowerCase())) || mockReports[0];
 
       const simulatedLogs = [
         `[${new Date().toLocaleTimeString()}] [INIT] Dispatched demo specimen: ${specimen.apk_name}`,
-        `[${new Date().toLocaleTimeString()}] [ZIP] Verified PK 03 04 zip container`,
+        `[${new Date().toLocaleTimeString()}] [ZIP] Verified PK 03 04 zip container and Dalvik headers`,
         `[${new Date().toLocaleTimeString()}] [DECOMPILE] Disassembled AndroidManifest.xml and Dalvik classes.dex`,
         `[${new Date().toLocaleTimeString()}] [PERM] Extracted ${specimen.manifest.permissions.length} declared permissions (${specimen.manifest.dangerous_permissions.length} dangerous)`,
-        `[${new Date().toLocaleTimeString()}] [XGBOOST] Evaluated 330-feature permission vector against Drebin model`,
+        `[${new Date().toLocaleTimeString()}] [VECTORS] Evaluated threat feature vectors against Drebin benchmark`,
         `[${new Date().toLocaleTimeString()}] [SCORE] Risk Score: ${specimen.ml_scoring.final_score}/100 (${specimen.ml_scoring.category})`,
-        `[${new Date().toLocaleTimeString()}] [LLM] Llama 3.2 synthesized threat narrative and CISO brief`,
+        `[${new Date().toLocaleTimeString()}] [LLM] Threat intelligence report and CISO brief synthesized`,
         `[${new Date().toLocaleTimeString()}] [COMPLETE] Report generated successfully.`
       ];
 
@@ -94,7 +95,7 @@ export const AnalysisPage: React.FC = () => {
           status: 'running',
           progress,
           current_step: step,
-          message: progress < 50 ? 'Decompiling bytecode...' : progress < 80 ? 'XGBoost feature scoring...' : 'Generating AI threat brief...',
+          message: progress < 50 ? 'Decompiling bytecode...' : progress < 80 ? 'Calculating threat feature vectors...' : 'Generating AI threat brief...',
           logs: simulatedLogs.slice(0, Math.floor((progress / 100) * simulatedLogs.length) + 1),
           result: null,
           error: null,
@@ -111,101 +112,12 @@ export const AnalysisPage: React.FC = () => {
       };
     }
 
-    // Real server polling with self-healing fallback
-    let stuckCount = 0;
-    let lastProgress = 0;
-    let isSelfHealing = false;
-
-    const runSelfHealingPipeline = () => {
-      if (isSelfHealing) return;
-      isSelfHealing = true;
-      clearInterval(pollInterval);
-
-      const targetApk = activeJob?.apk_name || sampleParam || (jobId?.includes('torch') ? 'icon-torch-flashlight.apk' : 'icon-torch-flashlight.apk');
-      const specimen = generateDynamicReport(targetApk, 49.4);
-
-      const selfHealingLogs = [
-        `[${new Date().toLocaleTimeString()}] [INIT] Dispatched payload: ${targetApk}`,
-        `[${new Date().toLocaleTimeString()}] [ZIP] Verified PK 03 04 zip container and Dalvik headers`,
-        `[${new Date().toLocaleTimeString()}] [DECOMPILE] Disassembled AndroidManifest.xml and Dalvik bytecode (classes.dex)`,
-        `[${new Date().toLocaleTimeString()}] [PERM] Extracted ${specimen.manifest.permissions.length} declared permissions (${specimen.manifest.dangerous_permissions.length} dangerous: ${specimen.manifest.dangerous_permissions.join(', ') || 'None'})`,
-        `[${new Date().toLocaleTimeString()}] [XGBOOST] Evaluated 330-feature matrix against Drebin XGBoost benchmark`,
-        `[${new Date().toLocaleTimeString()}] [SCORE] Risk Score: ${specimen.ml_scoring.final_score}/100 (${specimen.ml_scoring.category})`,
-        `[${new Date().toLocaleTimeString()}] [LLM] Llama 3.2 / Gemini AI synthesized CISO threat brief`,
-        `[${new Date().toLocaleTimeString()}] [COMPLETE] Comprehensive threat dossier ready for ${targetApk}.`
-      ];
-
-      let currentProg = job?.progress && job.progress >= 20 ? job.progress : 20;
-
-      pollInterval = setInterval(() => {
-        if (!isMounted) return;
-        currentProg += 16;
-        let step = currentProg < 40 ? 1 : currentProg < 70 ? 2 : currentProg < 88 ? 3 : 4;
-
-        if (currentProg >= 100) {
-          clearInterval(pollInterval);
-          const doneJob: AnalysisJob = {
-            job_id: jobId,
-            apk_name: targetApk,
-            original_name: targetApk,
-            status: 'done',
-            progress: 100,
-            current_step: 4,
-            message: 'Analysis complete',
-            logs: selfHealingLogs,
-            result: specimen,
-            error: null,
-            created_at: activeJob?.created_at || new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          };
-          setJob(doneJob);
-          setActiveJob(doneJob);
-          addReport(specimen);
-          addToast({
-            type: 'success',
-            title: 'Threat Analysis Complete',
-            message: `Dossier ready for ${targetApk}`
-          });
-          return;
-        }
-
-        const logSlice = Math.min(
-          selfHealingLogs.length,
-          Math.max(2, Math.floor((currentProg / 100) * selfHealingLogs.length) + 1)
-        );
-
-        const currentMsg =
-          currentProg < 40
-            ? 'Validating APK container & decompiling Dalvik bytecode...'
-            : currentProg < 70
-            ? 'Decompiling AndroidManifest.xml and Dalvik executables...'
-            : currentProg < 88
-            ? 'Running XGBoost 330-feature vector classifier & calculating SHAP...'
-            : 'Synthesizing AI threat intelligence & CISO executive brief...';
-
-        const updated: AnalysisJob = {
-          job_id: jobId,
-          apk_name: targetApk,
-          original_name: targetApk,
-          status: 'running',
-          progress: currentProg,
-          current_step: step,
-          message: currentMsg,
-          logs: selfHealingLogs.slice(0, logSlice),
-          result: null,
-          error: null,
-          created_at: activeJob?.created_at || new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        };
-        setJob(updated);
-        setActiveJob(updated);
-      }, 650);
-    };
-
+    // Real server polling — no fake report generation
     const poll = async () => {
       try {
         const data = await apiService.getJobStatus(jobId);
         if (!isMounted) return;
+        setPollError(null);
         setJob(data);
         setActiveJob(data);
 
@@ -218,37 +130,49 @@ export const AnalysisPage: React.FC = () => {
             message: `Report ready for ${data.result.apk_name}`
           });
         } else if (data.status === 'error') {
-          console.warn('Server pipeline error, initiating self-healing pipeline:', data.error);
-          runSelfHealingPipeline();
+          clearInterval(pollInterval);
+          setPollError(data.error || 'Pipeline execution failed on server.');
+          addToast({
+            type: 'error',
+            title: 'Analysis Failed',
+            message: data.error || 'The server was unable to decompile or process this APK.'
+          });
         } else if (data.status === 'cancelled') {
           clearInterval(pollInterval);
-        } else if (data.status === 'running') {
-          if (data.progress === lastProgress) {
-            stuckCount++;
-            if (stuckCount >= 4) {
-              console.warn('Job progress plateaued, accelerating via self-healing pipeline');
-              runSelfHealingPipeline();
-            }
-          } else {
-            stuckCount = 0;
-            lastProgress = data.progress;
-          }
         }
       } catch (err: any) {
         if (!isMounted) return;
-        console.warn('Polling error, engaging self-healing engine:', err);
-        runSelfHealingPipeline();
+        setNetworkRetries((prev) => {
+          const next = prev + 1;
+          if (next > 10) {
+            clearInterval(pollInterval);
+            setPollError('Network connection to analysis worker lost. Click retry to check status.');
+          }
+          return next;
+        });
       }
     };
 
     poll();
-    pollInterval = setInterval(poll, 750);
+    pollInterval = setInterval(poll, 1000);
 
     return () => {
       isMounted = false;
       clearInterval(pollInterval);
     };
   }, [jobId, sampleParam, setActiveJob, addReport, addToast]);
+
+  const handleRetryPoll = () => {
+    setPollError(null);
+    setNetworkRetries(0);
+    if (!jobId) return;
+    apiService.getJobStatus(jobId).then((data) => {
+      setJob(data);
+      setActiveJob(data);
+    }).catch((err) => {
+      setPollError(`Could not reach server: ${err.message}`);
+    });
+  };
 
   const handleCancel = async () => {
     if (!jobId) return;
@@ -263,7 +187,6 @@ export const AnalysisPage: React.FC = () => {
         setJob({ ...job, status: 'cancelled', message: 'Analysis cancelled by user' });
       }
     } catch {
-      // local cancel fallback
       if (job) setJob({ ...job, status: 'cancelled', message: 'Analysis cancelled by user' });
     }
   };
@@ -271,15 +194,15 @@ export const AnalysisPage: React.FC = () => {
   const steps = [
     { num: 1, label: 'Ingestion & Validation', icon: Shield },
     { num: 2, label: 'Bytecode Disassembly', icon: FileCode },
-    { num: 3, label: 'XGBoost ML Scoring', icon: Binary },
+    { num: 3, label: 'Threat Vector Attribution', icon: Binary },
     { num: 4, label: 'GenAI Threat Intelligence', icon: Bot },
   ];
 
   const currentStep = job?.current_step || 1;
   const isDone = job?.status === 'done';
-  const isError = job?.status === 'error';
+  const isError = job?.status === 'error' || Boolean(pollError);
   const isCancelled = job?.status === 'cancelled';
-  const isRunning = job?.status === 'running' || job?.status === 'queued';
+  const isRunning = (job?.status === 'running' || job?.status === 'queued') && !isError;
 
   return (
     <div className="min-h-screen py-10 px-4 sm:px-6 lg:px-8 max-w-5xl mx-auto">
@@ -292,7 +215,7 @@ export const AnalysisPage: React.FC = () => {
             <span className="text-sky-400">JOB #{jobId}</span>
           </div>
           <h1 className="text-2xl sm:text-3xl font-bold text-white font-sans tracking-tight">
-            {job?.apk_name || 'Static Analysis in Progress'}
+            {job?.apk_name || 'Static Analysis Pipeline'}
           </h1>
         </div>
 
@@ -305,6 +228,17 @@ export const AnalysisPage: React.FC = () => {
             >
               <StopCircle className="w-4 h-4" />
               <span>Cancel Job</span>
+            </button>
+          )}
+
+          {isError && (
+            <button
+              id="retry-poll-btn"
+              onClick={handleRetryPoll}
+              className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] text-slate-200 border border-white/[0.08] font-mono text-xs transition-colors"
+            >
+              <RotateCcw className="w-4 h-4 text-sky-400" />
+              <span>Retry Connection</span>
             </button>
           )}
 
@@ -321,6 +255,19 @@ export const AnalysisPage: React.FC = () => {
         </div>
       </div>
 
+      {/* Error Banner */}
+      {isError && (
+        <div className="mb-6 p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-200 flex items-start gap-3">
+          <XCircle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+          <div className="text-xs font-mono">
+            <span className="font-bold block uppercase tracking-wide">Analysis Failure</span>
+            <p className="mt-1 text-slate-300">
+              {job?.error || pollError || 'An error occurred during static analysis execution.'}
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Progress & Stepper Panel */}
       <div className="glass-panel rounded-2xl p-6 border border-white/[0.08] mb-6">
         <div className="flex items-center justify-between mb-4">
@@ -330,7 +277,7 @@ export const AnalysisPage: React.FC = () => {
             {isError && <XCircle className="w-4 h-4 text-red-400" />}
             {isCancelled && <AlertCircle className="w-4 h-4 text-amber-400" />}
             <span className="text-xs font-mono text-slate-300 font-medium">
-              {job?.message || 'Executing analysis pipeline...'}
+              {job?.message || (isError ? 'Analysis halted due to error' : 'Executing analysis pipeline...')}
             </span>
           </div>
           <span className="text-sm font-mono font-bold text-white">
@@ -348,47 +295,51 @@ export const AnalysisPage: React.FC = () => {
                 ? 'bg-amber-500'
                 : isDone
                 ? 'bg-emerald-400'
-                : 'bg-sky-400'
+                : 'bg-gradient-to-r from-sky-500 to-indigo-500'
             }`}
-            style={{ width: `${job?.progress ?? 5}%` }}
+            style={{ width: `${job?.progress ?? 0}%` }}
           />
         </div>
 
-        {/* 4 Steps Indicator */}
-        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 pt-2 border-t border-white/[0.05]">
-          {steps.map((step) => {
-            const Icon = step.icon;
-            const completed = currentStep > step.num || isDone;
-            const active = currentStep === step.num && !isDone;
+        {/* Stepper */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {steps.map((s) => {
+            const Icon = s.icon;
+            const isPassed = currentStep > s.num || isDone;
+            const isCurrent = currentStep === s.num && !isDone && !isError;
+            const isFailed = isError && currentStep === s.num;
+
+            let badgeClass = 'border-white/[0.08] bg-white/[0.02] text-slate-400';
+            if (isPassed) {
+              badgeClass = 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400';
+            } else if (isCurrent) {
+              badgeClass = 'border-sky-500/50 bg-sky-500/15 text-sky-300 ring-2 ring-sky-500/20';
+            } else if (isFailed) {
+              badgeClass = 'border-red-500/40 bg-red-500/10 text-red-300';
+            }
 
             return (
               <div
-                key={step.num}
-                className={`p-3 rounded-xl border flex items-center gap-3 transition-all ${
-                  completed
-                    ? 'bg-emerald-500/5 border-emerald-500/20 text-emerald-400'
-                    : active
-                    ? 'bg-sky-500/10 border-sky-500/30 text-sky-300 shadow-sm shadow-sky-950'
-                    : 'bg-white/[0.01] border-white/[0.04] text-slate-400'
-                }`}
+                key={s.num}
+                className={`p-3 rounded-xl border flex items-center gap-3 transition-all ${badgeClass}`}
               >
-                <div
-                  className={`w-7 h-7 rounded-lg flex items-center justify-center font-mono text-xs font-bold ${
-                    completed
-                      ? 'bg-emerald-500/20 text-emerald-300'
-                      : active
-                      ? 'bg-sky-500/20 text-sky-300 animate-pulse'
-                      : 'bg-white/[0.04] text-slate-400'
-                  }`}
-                >
-                  {completed ? <CheckCircle2 className="w-4 h-4" /> : step.num}
+                <div className="w-8 h-8 rounded-lg bg-black/40 flex items-center justify-center shrink-0">
+                  {isPassed ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  ) : isCurrent ? (
+                    <Loader2 className="w-4 h-4 text-sky-400 animate-spin" />
+                  ) : isFailed ? (
+                    <XCircle className="w-4 h-4 text-red-400" />
+                  ) : (
+                    <Icon className="w-4 h-4 text-slate-400" />
+                  )}
                 </div>
                 <div className="min-w-0">
-                  <span className="text-[11px] font-mono font-semibold block truncate">
-                    {step.label}
+                  <span className="text-[10px] font-mono block text-slate-400 uppercase">
+                    Step 0{s.num}
                   </span>
-                  <span className="text-[10px] text-slate-400 font-sans block">
-                    {completed ? 'Completed' : active ? 'Processing...' : 'Waiting'}
+                  <span className="text-xs font-semibold text-white block truncate">
+                    {s.label}
                   </span>
                 </div>
               </div>
@@ -397,76 +348,44 @@ export const AnalysisPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Live Terminal Console */}
+      {/* Live Terminal Output Panel */}
       <div className="glass-panel rounded-2xl border border-white/[0.08] overflow-hidden">
-        <div className="px-5 py-3 border-b border-white/[0.06] bg-black/40 flex items-center justify-between">
+        <div className="px-5 py-3 border-b border-white/[0.06] bg-white/[0.01] flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Terminal className="w-4 h-4 text-sky-400" />
-            <span className="text-xs font-mono font-bold text-slate-200">
-              TELEMETRY LOG STREAM (stdout/stderr)
+            <Terminal className="w-4 h-4 text-slate-400" />
+            <span className="text-xs font-mono font-semibold text-slate-200">
+              Live Pipeline Telemetry Output
             </span>
           </div>
-          <div className="flex items-center gap-2 text-[10px] font-mono text-slate-400">
-            <Clock className="w-3 h-3 text-slate-400" />
-            <span>Real-time bytecode parser</span>
-          </div>
+          <span className="text-[10px] font-mono text-slate-400">
+            {job?.logs?.length || 0} events logged
+          </span>
         </div>
 
-        <div className="p-4 bg-black/85 font-mono text-xs leading-relaxed text-slate-300 max-h-96 overflow-y-auto space-y-1">
-          {job?.logs && job.logs.length > 0 ? (
-            job.logs.map((line, idx) => {
-              const isCrit = line.includes('CRITICAL') || line.includes('ERROR');
-              const isSuccess = line.includes('COMPLETE') || line.includes('done') || line.includes('Verified');
-              const isNotice = line.includes('XGBOOST') || line.includes('LLM');
+        <div className="p-5 font-mono text-xs text-slate-300 bg-black/50 min-h-[300px] max-h-[420px] overflow-y-auto space-y-2 select-text">
+          {(!job?.logs || job.logs.length === 0) ? (
+            <div className="text-slate-500 italic py-8 text-center">
+              Waiting for worker process to emit execution logs...
+            </div>
+          ) : (
+            job.logs.map((log, index) => {
+              let color = 'text-slate-300';
+              if (log.includes('[ERROR]')) color = 'text-red-400 font-semibold';
+              else if (log.includes('[COMPLETE]')) color = 'text-emerald-400 font-semibold';
+              else if (log.includes('[VECTORS]') || log.includes('[SCORE]')) color = 'text-sky-300';
+              else if (log.includes('[PERM]') || log.includes('[DECOMPILE]')) color = 'text-amber-300';
+              else if (log.includes('[LLM')) color = 'text-indigo-300';
 
               return (
-                <div key={idx} className="flex items-start gap-2">
-                  <span className="text-slate-400 select-none text-[11px]">&gt;</span>
-                  <span
-                    className={`${
-                      isCrit
-                        ? 'text-red-400 font-semibold'
-                        : isSuccess
-                        ? 'text-emerald-400'
-                        : isNotice
-                        ? 'text-sky-300'
-                        : 'text-slate-300'
-                    }`}
-                  >
-                    {line}
-                  </span>
+                <div key={index} className={`leading-relaxed break-all ${color}`}>
+                  {log}
                 </div>
               );
             })
-          ) : (
-            <div className="text-slate-400 italic">Initializing execution worker...</div>
           )}
           <div ref={logsEndRef} />
         </div>
       </div>
-
-      {/* Failure or Cancel Notice */}
-      {(isError || isCancelled) && (
-        <div className="mt-6 p-4 rounded-xl border border-red-500/30 bg-red-500/10 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <XCircle className="w-5 h-5 text-red-400" />
-            <div>
-              <h4 className="text-sm font-semibold text-white font-mono">
-                {isCancelled ? 'Analysis Job Aborted' : 'Pipeline Execution Failed'}
-              </h4>
-              <p className="text-xs text-red-200/80 mt-0.5 font-sans">
-                {job?.error || pollError || 'Execution was halted before completion.'}
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={() => navigate('/dashboard')}
-            className="px-3.5 py-1.5 rounded-lg bg-white/[0.08] hover:bg-white/[0.15] text-white font-mono text-xs"
-          >
-            Return to Dashboard
-          </button>
-        </div>
-      )}
     </div>
   );
 };

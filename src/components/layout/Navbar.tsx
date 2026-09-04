@@ -11,18 +11,23 @@ export const Navbar: React.FC = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   useEffect(() => {
-    // Initial health check
-    apiService.checkHealth().then(({ api, ollama }) => {
-      setSystemHealth(api, ollama);
-    });
+    let isMounted = true;
+    const check = async () => {
+      try {
+        const { api, ollama } = await apiService.checkHealth();
+        if (isMounted) setSystemHealth(api, ollama);
+      } catch {
+        if (isMounted) setSystemHealth(false, false);
+      }
+    };
 
-    const interval = setInterval(() => {
-      apiService.checkHealth().then(({ api, ollama }) => {
-        setSystemHealth(api, ollama);
-      });
-    }, 20000);
+    check();
+    const interval = setInterval(check, 25000);
 
-    return () => clearInterval(interval);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
   }, [setSystemHealth]);
 
   const navLinks = [

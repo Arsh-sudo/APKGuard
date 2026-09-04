@@ -6,7 +6,7 @@ const BASE_URL = import.meta.env.VITE_API_URL || '';
 
 export const apiClient = axios.create({
   baseURL: BASE_URL,
-  timeout: 30000,
+  timeout: 35000,
 });
 
 export const apiService = {
@@ -16,7 +16,7 @@ export const apiService = {
       const hasOllama = res.data?.model === 'loaded' || res.data?.ollama !== 'down';
       return { api: true, ollama: hasOllama };
     } catch {
-      // Fallback check to integrated endpoint
+      // Fallback check to alternative endpoint
       try {
         await apiClient.get('/api/health', { timeout: 3000 });
         return { api: true, ollama: true };
@@ -36,34 +36,12 @@ export const apiService = {
     }
   },
 
+  // Single-request reports fetch without thundering herd
   async getReports(): Promise<APKReport[]> {
     try {
-      const res = await apiClient.get('/reports');
+      const res = await apiClient.get<APKReport[]>('/reports');
       if (Array.isArray(res.data) && res.data.length > 0) {
-        // Fetch full reports or enrich minimal items
-        const enriched = await Promise.all(
-          res.data.slice(0, 30).map(async (item: any) => {
-            if (item.manifest && item.ml_scoring) return item as APKReport;
-            try {
-              const full = await apiClient.get(`/report/${item.apk_name || item.name}`);
-              return full.data as APKReport;
-            } catch {
-              // Match mock report if exists
-              const found = mockReports.find(m => m.apk_name === item.apk_name);
-              return found || ({
-                apk_name: item.apk_name || 'sample.apk',
-                apk_size_kb: 1024,
-                analysed_at: item.analysed_at || new Date().toISOString(),
-                manifest: { package: item.package || 'com.app.sample', version_name: '1.0', version_code: '1', permissions: [], dangerous_permissions: [], activities_count: 2, services_count: 1, receivers_count: 1, providers_count: 0, activities: [], services: [], receivers: [] },
-                static_analysis: { total_java_files: 100, hardcoded_urls: [], hardcoded_ips: [], suspicious_keywords: {}, obfuscation_score: 10, obfuscation_flag: false, native_lib_count: 0, native_libs: [], dex_count: 1, smali_file_count: 100, md5: '', sha1: '', sha256: '' },
-                heuristic_scoring: { heuristic_score: item.final_score || 20, category: item.category || 'LOW_RISK', reasons: [] },
-                ml_scoring: { ml_probability: (item.final_score || 20) / 100, ml_score: item.final_score || 20, heuristic_score: item.final_score || 20, final_score: item.final_score || 20, category: item.category || 'LOW_RISK', model_confidence: 95, top_features: [], operating_threshold: 0.8 },
-                llm_analysis: null
-              } as APKReport);
-            }
-          })
-        );
-        return enriched;
+        return res.data;
       }
       return mockReports;
     } catch (e) {
@@ -75,7 +53,7 @@ export const apiService = {
   async getReport(apkName: string): Promise<APKReport> {
     const cleanName = apkName.endsWith('.apk') ? apkName : `${apkName}.apk`;
     try {
-      const res = await apiClient.get(`/report/${cleanName}`);
+      const res = await apiClient.get<APKReport>(`/report/${encodeURIComponent(cleanName)}`);
       return res.data;
     } catch {
       // Find in mock data
@@ -90,12 +68,13 @@ export const apiService = {
   async deleteReport(apkName: string): Promise<void> {
     const cleanName = apkName.endsWith('.apk') ? apkName : `${apkName}.apk`;
     try {
-      await apiClient.delete(`/report/${cleanName}`);
+      await apiClient.delete(`/report/${encodeURIComponent(cleanName)}`);
     } catch {
       console.log(`Local delete for ${cleanName}`);
     }
   },
 
+  // Propagates actual upload errors to caller without generating fake jobs
   async uploadAndAnalyse(file: File, runLlm: boolean): Promise<{ job_id: string; message: string }> {
     const form = new FormData();
     form.append('file', file);
@@ -103,36 +82,31 @@ export const apiService = {
 
     const endpoint = runLlm ? '/analyse' : '/quick-score';
     try {
-      const res = await apiClient.post(endpoint, form);
+      const res = await apiClient.post(endpoint, form, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
       return res.data;
-    } catch (e: any) {
-      // Fallback: create simulated job ID so analysis flow can proceed even if file upload encounters backend issues
-      console.warn('Backend upload failed, starting realistic analysis simulator:', e);
-      const simulatedId = 'job_' + Math.random().toString(36).substring(2, 12);
-      return {
-        job_id: simulatedId,
-        message: 'Analysis initiated successfully'
-      };
+    } catch (err: any) {
+      const msg = err.response?.data?.detail || err.message || 'File upload failed';
+      throw new Error(msg);
     }
   },
 
   async pollJob(jobId: string): Promise<Job> {
-    try {
-      const res = await apiClient.get<Job>(`/job/${jobId}`);
-      return res.data;
-    } catch (e) {
-      throw e;
-    }
+    const res = await apiClient.get<Job>(`/job/${encodeURIComponent(jobId)}`);
+    return res.data;
   },
 
   async getJobStatus(jobId: string): Promise<Job> {
-    const res = await apiClient.get<Job>(`/job/${jobId}`);
+    const res = await apiClient.get<Job>(`/job/${encodeURIComponent(jobId)}`);
     return res.data;
   },
 
   async cancelJob(jobId: string): Promise<void> {
     try {
-      await apiClient.post(`/job/${jobId}/cancel`);
+      await apiClient.post(`/job/${encodeURIComponent(jobId)}/cancel`);
     } catch (e) {
       console.warn('Failed to cancel job:', e);
     }

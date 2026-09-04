@@ -42,6 +42,17 @@ interface AppState {
   removeToast: (id: string) => void;
 }
 
+const getInitialUseLLM = (): boolean => {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      return localStorage.getItem('apkguard_use_llm') !== 'false';
+    }
+  } catch {
+    // Ignore sandbox or security exceptions
+  }
+  return true;
+};
+
 export const useAppStore = create<AppState>((set, get) => ({
   reports: mockReports,
   selectedReport: null,
@@ -50,7 +61,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   selectedCategory: 'ALL',
   
   activeJob: null,
-  useLLM: typeof window !== 'undefined' ? localStorage.getItem('apkguard_use_llm') !== 'false' : true,
+  useLLM: getInitialUseLLM(),
   isUploading: false,
   uploadProgress: 0,
 
@@ -79,8 +90,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     activeJob: state.activeJob ? { ...state.activeJob, ...partial } : null
   })),
   setUseLLM: (useLLM) => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('apkguard_use_llm', String(useLLM));
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        localStorage.setItem('apkguard_use_llm', String(useLLM));
+      }
+    } catch {
+      // Ignore
     }
     set({ useLLM });
   },

@@ -10,17 +10,17 @@ interface BadgeProps {
 }
 
 export const Badge: React.FC<BadgeProps> = ({
-  category = 'LOW_RISK',
+  category = 'UNKNOWN',
   score,
   size = 'md',
   className = '',
   showIcon = true,
 }) => {
-  const norm = String(category).toUpperCase().replace(/\s+/g, '_');
+  const norm = String(category || 'UNKNOWN').toUpperCase().replace(/[\s_-]+/g, '_');
 
-  let bgClass = 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30';
-  let dotClass = 'bg-emerald-400';
-  let label = 'LOW RISK';
+  let bgClass = 'bg-slate-500/15 text-slate-300 border-slate-500/30';
+  let dotClass = 'bg-slate-400';
+  let label = 'UNASSESSED';
 
   if (norm.includes('CRITICAL')) {
     bgClass = 'bg-red-500/15 text-red-400 border-red-500/40 shadow-sm shadow-red-950/40';
@@ -30,18 +30,18 @@ export const Badge: React.FC<BadgeProps> = ({
     bgClass = 'bg-amber-500/15 text-amber-400 border-amber-500/40';
     dotClass = 'bg-amber-400';
     label = 'HIGH RISK';
-  } else if (norm.includes('SUSPICIOUS')) {
+  } else if (norm.includes('SUSPICIOUS') || norm.includes('MEDIUM')) {
     bgClass = 'bg-yellow-500/15 text-yellow-300 border-yellow-500/40';
     dotClass = 'bg-yellow-300';
     label = 'SUSPICIOUS';
-  } else if (norm.includes('LOW')) {
+  } else if (norm.includes('LOW') || norm.includes('SAFE') || norm.includes('BENIGN')) {
     bgClass = 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30';
     dotClass = 'bg-emerald-400';
     label = 'LOW RISK';
   } else {
-    bgClass = 'bg-blue-500/15 text-blue-400 border-blue-500/30';
-    dotClass = 'bg-blue-400';
-    label = norm;
+    bgClass = 'bg-slate-500/15 text-slate-300 border-slate-500/30';
+    dotClass = 'bg-slate-400';
+    label = norm.length > 0 && norm !== 'UNKNOWN' ? norm.replace(/_/g, ' ') : 'UNKNOWN';
   }
 
   const sizeStyles = {

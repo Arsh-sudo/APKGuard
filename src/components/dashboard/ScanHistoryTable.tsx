@@ -22,6 +22,15 @@ export const ScanHistoryTable: React.FC<ScanHistoryTableProps> = ({ reports }) =
     { label: 'Low Risk', value: 'LOW_RISK' },
   ];
 
+  const normalizeCategory = (cat: string | undefined): VerdictCategory => {
+    const c = String(cat || '').toUpperCase().replace(/[\s_-]+/g, '_');
+    if (c.includes('CRITICAL')) return 'CRITICAL';
+    if (c.includes('HIGH')) return 'HIGH_RISK';
+    if (c.includes('SUSPICIOUS') || c.includes('MEDIUM')) return 'SUSPICIOUS';
+    if (c.includes('LOW') || c.includes('SAFE') || c.includes('BENIGN')) return 'LOW_RISK';
+    return 'UNKNOWN';
+  };
+
   const filteredReports = reports.filter((r) => {
     const term = searchTerm.toLowerCase();
     const matchesSearch =
@@ -32,8 +41,7 @@ export const ScanHistoryTable: React.FC<ScanHistoryTableProps> = ({ reports }) =
     if (!matchesSearch) return false;
 
     if (selectedCategory === 'ALL') return true;
-    const cat = String(r.ml_scoring?.category || '').toUpperCase().replace(/\s+/g, '_');
-    return cat.includes(selectedCategory);
+    return normalizeCategory(r.ml_scoring?.category) === selectedCategory;
   });
 
   const handleDelete = async (e: React.MouseEvent, apkName: string) => {

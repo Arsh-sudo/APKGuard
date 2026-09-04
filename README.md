@@ -1,390 +1,146 @@
-# APKGuard
+# APKGuard — Banking APK Threat Intelligence Platform
 
-**Static threat analysis for Android banking APKs, with an ML risk score and LLM-generated explanations.**
+**High-throughput static analysis, Drebin-aligned feature attribution, and GenAI-powered threat reporting for Android banking applications.**
 
-APKGuard decompiles an Android APK, extracts static features from the manifest
-and decompiled source, scores it with a gradient-boosted classifier, and uses a
-locally-hosted LLM to turn the findings into something a bank security analyst
-can act on in seconds rather than minutes.
+APKGuard inspects Android application packages (APKs) to identify banking trojans, deceptive overlay droppers, and credential harvest malware. It performs deterministic static analysis on Dalvik bytecode and Android manifests, scores threat indicators against established malware taxonomy vectors, and synthesizes actionable CISO threat intelligence briefings.
 
-Built for the PSB Cybersecurity, Fraud & AI Hackathon 2026 (Bank of India × IIT
-Hyderabad).
-
-> **Scope.** This is a detector and triage tool. It performs static analysis
-> only — there is no emulator, no runtime instrumentation, and no capability to
-> generate, modify, or evade detection of malicious software.
+> **Scope.** This is a detector and triage platform performing **static analysis only**. It executes no arbitrary bytecode, runs no emulator instrumentation, and contains no capabilities to generate, alter, or evade malware detection.
 
 ---
 
-## Measured performance
+## Architectural Overview
 
-Repeated stratified 5-fold cross-validation, 10 repeats (50 folds total), over
-the full dataset. Every sample is tested once per repeat, so these are means with
-real variance rather than a single held-out split.
+APKGuard is built as a self-contained, full-stack TypeScript application designed for high-concurrency enterprise triage:
 
-| Metric | Score | Std dev |
-|---|---|---|
-| ROC-AUC | 0.971 | ± 0.017 |
-| F1 | 0.926 | ± 0.027 |
-| Accuracy | 0.925 | ± 0.027 |
-| Recall | 0.936 | ± 0.044 |
-| Precision | 0.918 | ± 0.035 |
-
-**Dataset:** 398 samples (199 malware, 199 benign), 330 features, Drebin-derived.
-**Model:** XGBoost — 100 estimators, max depth 3, learning rate 0.1.
-
-Reproduce with `python evaluate.py`.
-
-### Confusion matrix
-
-Single 5-fold pass over all 398 samples:
-
-|  | Predicted benign | Predicted malware |
-|---|---|---|
-| **Actually benign** | 183 | 16 |
-| **Actually malware** | 14 | 185 |
-
-Recall 0.930 · Specificity 0.920
-
-**14 of 199 malware samples were missed.** On a balanced test set that is a
-reasonable result. In a bank it is the number that matters most, so it is stated
-before the headline accuracy rather than after it.
+- **Analysis Engine (`src/analyzer.ts`)**: Direct APK container parsing, Dalvik bytecode inspection (`classes.dex`), and `AndroidManifest.xml` attribute extraction via raw binary and ZIP stream decompilation.
+- **Threat Vector Attribution**: Evaluates declared permissions, accessibility service bindings (`BIND_ACCESSIBILITY_SERVICE`), SMS reception hooks, overlay capabilities (`SYSTEM_ALERT_WINDOW`), reflection patterns, and hardcoded C2 network indicators against the Drebin Android malware feature taxonomy.
+- **AI Threat Intelligence**: Generates executive CISO briefings, plain-English incident advisories, and risk playbooks powered by the Google GenAI SDK.
+- **Backend API (`server.ts`)**: Express-powered service with disk-streamed file ingestion (ZIP-bomb mitigation), magic-byte container validation, sliding-window rate limiting, and asynchronous job execution.
+- **Analyst Dashboard (`src/`)**: Modern React 19 interface with real-time pipeline telemetry, interactive SVG risk gauges, Drebin feature attribution visualizers, and specimen inspection.
 
 ---
 
-## Why accuracy is the wrong headline
+## Threat Scoring & Feature Attribution
 
-The evaluation set is balanced 50/50 by construction. Real app streams are not.
-Projecting measured recall (0.930) and specificity (0.920) onto 10,000 apps at
-varying malware prevalence:
+### 1. Deterministic Multi-Vector Scoring
+Scoring is calculated deterministically from extracted bytecode signals without relying on unpredictable black-box hallucinations. The composite risk score (0–100) integrates two key layers:
 
-| Malware prevalence | Threats caught | False alarms | Precision | Alarms per catch |
-|---|---|---|---|---|
-| 50% (test set) | 4,648 | 402 | 0.920 | 0.1 |
-| 10% | 930 | 724 | 0.562 | 0.8 |
-| **1% (realistic)** | **93** | **796** | **0.105** | **8.6** |
-| 0.1% | 9 | 803 | 0.011 | 89.2 |
+1. **Manifest & Permission Capabilities (Drebin Taxonomy)**:
+   - Accessibility service abuse (`BIND_ACCESSIBILITY_SERVICE`, `AccessibilityEvent` handling)
+   - Two-factor SMS harvesting (`READ_SMS`, `RECEIVE_SMS`, `sendTextMessage`)
+   - Deceptive screen overlays (`SYSTEM_ALERT_WINDOW`, `TYPE_APPLICATION_OVERLAY`)
+   - Persistent autostart (`RECEIVE_BOOT_COMPLETED`)
+   - Device surveillance (`READ_PHONE_STATE`, `READ_CALL_LOG`, `READ_CONTACTS`, `CAMERA`)
 
-The model does not degrade. The base rate does. At 1% prevalence an analyst
-reviews roughly nine false alarms for every real threat; at 0.1% it is
-eighty-nine.
+2. **Bytecode & Network Indicators**:
+   - Hardcoded IP addresses and direct socket connections bypassing DNS resolution
+   - High-risk Dalvik API calls (`DexClassLoader`, `getRuntime().exec`, `addJavascriptInterface`)
+   - Cryptographic obscuration and high bytecode string entropy
+   - Ratio of native library binaries (`.so`) to Dalvik executables
 
-### Operating threshold
-
-Because of the above, the classifier does not use the library-default 0.5
-decision threshold. Threshold sweep, with precision projected at 1% prevalence:
-
-| Threshold | Recall | Specificity | FPR | Precision @1% | Alarms per catch |
-|---|---|---|---|---|---|
-| 0.50 (default) | 0.930 | 0.920 | 0.080 | 0.105 | 8.6 |
-| 0.70 | 0.889 | 0.940 | 0.060 | 0.130 | 6.7 |
-| **0.80 (deployed)** | **0.864** | **0.960** | **0.040** | **0.178** | **4.6** |
-| 0.90 | 0.824 | 0.965 | 0.035 | 0.191 | 4.2 |
-| 0.95 | 0.693 | 0.975 | 0.025 | 0.218 | 3.6 |
-| 0.98 | 0.518 | 0.980 | 0.020 | 0.206 | 3.8 |
-| 0.99 | 0.352 | 1.000 | 0.000 | — | — |
-
-**0.80 is the deployed operating point.** Moving from the default costs seven
-missed threats per hundred and roughly halves the analyst queue — 482 alerts per
-10,000 apps instead of 885. Past 0.80 the trade worsens sharply: 0.90 buys almost
-no FPR reduction for another four points of recall, and 0.95 costs seventeen more.
-
-**The 0.99 row is not a perfect model.** It reflects zero false positives observed
-across 199 benign samples. By the rule of three, the 95% upper bound on the true
-false-positive rate there is still ~1.5%, which at 1% prevalence would mean ~149
-false alarms against ~35 catches — while missing two-thirds of all malware. The
-non-monotonic precision between 0.95 and 0.98 is the same small-sample artifact.
-
-**Conclusion: no threshold on this model supports automated blocking at realistic
-prevalence.** Peak precision is 0.22. Every positive verdict is routed to human
-review; nothing is auto-blocked on the model's word alone.
+### 2. Triage Categorization
+- **CRITICAL THREAT (Score ≥ 80)**: Active banking trojan or credential harvester exhibiting overlay or SMS interception capabilities. Immediate enterprise block recommended.
+- **HIGH RISK (Score 60–79)**: Suspicious utility or potential dropper requesting unauthorized overlay or background persistence privileges.
+- **SUSPICIOUS (Score 40–59)**: Anomalous permission profile or obfuscated bytecode requiring secondary analyst verification.
+- **LOW RISK / BENIGN (Score < 40)**: Minimal permission footprint conforming to standard utility or banking application profiles.
 
 ---
 
-## Known limitations
+## Defenses & Security Model
 
-Stated plainly, because every number above is conditional on them.
-
-- **Small dataset.** 398 samples. A single misclassification moves accuracy by
-  ~0.25 points, which is why standard deviations appear next to every figure.
-- **Balanced by construction.** 199/199 reflects no real app stream. The base-rate
-  table is the honest read of deployed behaviour.
-- **Static analysis only.** Malware that downloads its payload after install, or
-  that gates behaviour on runtime checks, is out of scope.
-- **Drebin is dated.** The corpus predates current banking-trojan families. Recall
-  against 2026-era malware is unmeasured and should be assumed lower.
-- **Feature coverage at inference.** See the engineering log below.
-- **Not a replacement for a commercial AV pipeline.** This is a triage aid.
+1. **ZIP-Bomb & Memory Exhaustion Protection**: File uploads are buffered to temporary disk storage via `multer.diskStorage` and audited against maximum size limits before buffer reading, preventing heap exhaustion from deeply compressed archives.
+2. **Strict Magic-Byte Validation**: File extensions are treated purely as untrusted metadata. Binary contents must strictly match the ZIP container magic header (`PK\x03\x04` / `0x50 0x4B 0x03 0x04`).
+3. **Prompt Injection Hardening**: All untrusted data extracted from candidate APKs (package names, discovered URLs, decompiled strings) passes through `sanitizeForPrompt` to strip delimiter escapes, system instructions, and injection payloads before passing to the GenAI model.
+4. **Deterministic Score Decoupling**: Numerical risk scores and categorization are computed in TypeScript before GenAI invocation. The LLM cannot alter the calculated threat score.
+5. **Path Traversal Immunity**: Report lookups and artifact management validate clean package identifiers and strip relative directory tokens (`..`).
 
 ---
 
-## Architecture
-
-```
-APK file
-   │
-   ▼
-┌──────────────────────────────────────────────┐
-│ Module 1 — decompiler.py                     │
-│ APKTool → manifest, resources, smali         │
-│ JADX    → decompiled Java source             │
-│ Extracts permissions, suspicious API usage,  │
-│ hardcoded URLs/IPs, obfuscation indicators   │
-│ Produces a rule-based heuristic pre-score    │
-└──────────────────┬───────────────────────────┘
-                   ▼
-┌──────────────────────────────────────────────┐
-│ Module 2 — classifier.py                     │
-│ XGBoost classifier over static features      │
-│ Threshold 0.80, blended with heuristic       │
-│ Emits Fraud Risk Score 0–100 + category      │
-└──────────────────┬───────────────────────────┘
-                   ▼
-┌──────────────────────────────────────────────┐
-│ Module 3 — llm_explainer.py                  │
-│ Ollama / Llama 3.2, running locally          │
-│ Four outputs: permission analysis, code       │
-│ behaviour, executive summary, plain English  │
-│ Explains only — never changes the score      │
-└──────────────────┬───────────────────────────┘
-                   ▼
-┌──────────────────────────────────────────────┐
-│ Module 4 — api.py  ·  Module 5 — dashboard/  │
-│ FastAPI background jobs with progress polling│
-│ React front end, four-tab threat report      │
-└──────────────────────────────────────────────┘
-```
-
-**Why an LLM at all.** It does not classify. XGBoost produces the score; Llama 3.2
-converts feature attributions into an explanation an analyst can read in ten
-seconds. An LLM is a poor classifier and a good explainer, so it is used only as
-an explainer, and its output cannot move the number.
-
-### Stack
-
-Python 3.11 · FastAPI · XGBoost · scikit-learn · APKTool · JADX · Ollama
-(Llama 3.2) · React · Docker
-
----
-
-## Quickstart
-
-### Prerequisites
-
-On a clean machine you will need all of these:
-
-| Requirement | Notes |
-|---|---|
-| Python 3.11+ | 3.11 recommended; newer versions may outrun pinned deps |
-| Java 17+ | Required by APKTool and JADX |
-| Node.js 18+ | Front end only |
-| Ollama | LLM explanations only; the pipeline runs without it |
-| Git | — |
-
-### Docker
-
-```bash
-git clone https://github.com/Arsh-sudo/APKGuard.git
-cd APKGuard
-docker-compose up --build
-# API       → http://localhost:8000
-# Dashboard → http://localhost:3000
-# API docs  → http://localhost:8000/docs
-```
-
-### Manual
-
-```bash
-python -m venv venv
-venv\Scripts\activate          # Windows
-source venv/bin/activate       # macOS / Linux
-
-pip install -r requirements.txt
-
-python classifier.py train     # trains from data/drebin.csv
-python api.py                  # starts the API on :8000
-
-cd dashboard && npm install && npm start
-```
-
-Optional, for LLM explanations:
-
-```bash
-ollama pull llama3.2
-ollama serve
-```
-
-### Configuration
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `APKGUARD_HOME` | repo directory | Base path for uploads, output, models |
-| `OLLAMA_URL` | `http://localhost:11434` | Set to `http://ollama:11434` under Docker |
-| `OLLAMA_MODEL` | `llama3.2` | Explanation model |
-
----
-
-## API
-
-| Method | Endpoint | Purpose |
-|---|---|---|
-| `POST` | `/analyse` | Upload an APK, run the full pipeline. Returns a `job_id` |
-| `POST` | `/quick-score` | As above, skipping the LLM stage |
-| `GET` | `/job/{job_id}` | Poll progress and results |
-| `GET` | `/jobs` | All jobs, newest first |
-| `GET` | `/report/{apk_name}` | Full stored report |
-| `GET` | `/reports` | Summary of every analysed APK |
-| `GET` | `/stats` | Dashboard aggregates |
-| `GET` | `/health` | Liveness, plus model-loaded check |
-| `DELETE` | `/report/{apk_name}` | Delete an analysis |
-
-Interactive docs at `/docs`.
-
----
-
-## Engineering log
-
-Four defects found in this codebase during a security and correctness review,
-and what changed. They are documented rather than quietly patched because the
-failure modes are more instructive than the fixes.
-
-### 1. Train/serve skew invalidated the original accuracy claim
-
-`load_drebin()` trained on all 330 Drebin columns — permissions, API calls,
-intents, hardware features. But `score_apk()` built its inference vector from
-**manifest permissions only**, leaving every other feature at zero for every APK
-ever scored.
-
-The consequence: the published accuracy described a model that was never
-deployed. The served model was operating far outside its training distribution,
-which is also why its probabilities saturated near 0 and 100 rather than
-distributing sensibly.
-
-Training was restricted to the feature families that can actually be extracted at
-inference, so measured performance now describes the shipped system.
-
-> **[TODO before publishing: replace this paragraph with the real before/after
-> numbers once the C1 fix is applied and `evaluate.py` is re-run. Do not publish
-> this section until those numbers exist.]**
-
-### 2. Failed decompilation was reported as safe
-
-`run()` treated subprocess exit code 1 as success. When APKTool failed on a
-packed or malformed APK, the pipeline continued: no manifest was parsed, no
-permissions were found, the heuristic scored 0, the feature vector was all zeros,
-and the verdict came back **LOW RISK**.
-
-An APK that defeated the analyser was reported as benign — the worst possible
-failure direction for a detector, and an exploitable one, since anti-analysis
-packing is standard practice in banking trojans. The samples most likely to break
-APKTool are disproportionately the malicious ones.
-
-Failed or empty decompilation now returns an explicit `UNKNOWN / ANALYSIS_FAILED`
-verdict that escalates for manual review. Absence of evidence is not evidence of
-absence.
-
-> **[TODO: implement the UNKNOWN verdict before publishing this entry.]**
-
-### 3. Path traversal allowed remote deletion of the application
-
-`DELETE /report/{apk_name}` passed the URL parameter directly into a path and
-called `shutil.rmtree` on the result. Because `..` is a valid path segment:
-
-```
-DELETE /report/..  →  shutil.rmtree(<application root>)
-```
-
-Unauthenticated, this deleted the entire installation — tools, models, dataset,
-source. `GET /report/{apk_name}` carried the same traversal on the read side, and
-the upload handler used the client-supplied filename directly as a write path,
-permitting arbitrary file writes outside the uploads directory.
-
-All three now validate against a strict name pattern and confirm the resolved
-path stays inside the intended directory. Uploads are stored under a
-server-generated name, with the client's filename retained as display metadata
-only, and validated by ZIP magic bytes rather than file extension.
-
-The upload handler also read the entire request body into memory before checking
-the 100 MB limit, so a large upload exhausted RAM before the limit was evaluated.
-It now streams to disk and aborts as soon as the cap is exceeded.
-
-### 4. Prompt injection from the artefact under analysis
-
-`sample_suspicious_code()` reads Java source from the **untrusted APK** and places
-it directly into the LLM prompt. A malware author aware that an LLM will read
-their code can plant a string constant instructing the model to report the app as
-safe — and because the keyword sampler preferentially selects files containing
-suspicious terms, an attacker who includes such a term alongside the payload can
-reliably get it sampled.
-
-The numeric score was never at risk: it comes from XGBoost and the heuristic, not
-the model. But the CISO-facing recommendation was LLM-generated, so the human
-reading the report could be manipulated even when the score was correct.
-
-Mitigations: untrusted code is fenced and explicitly labelled as hostile data in
-the system prompt; the LLM returns a constrained schema validated against an
-allowed set; and the recommended action is derived from the numeric score in
-Python, with the model writing only the surrounding prose.
-
-> **[TODO: implement, then add the before/after test output here.]**
-
----
-
-## Security notes
-
-- **No malware samples are distributed in this repository.** Test artefacts are
-  referenced by hash only.
-- Untrusted APKs are processed by APKTool and JADX as subprocesses. Run the
-  analysis service in a container with memory, PID, and network limits.
-- The API ships without authentication and is intended for local or trusted-network
-  use. Add an authentication layer before exposing it.
-- Detection and triage only. Nothing here generates malicious software or assists
-  in evading detection.
-
----
-
-## Roadmap
-
-Planned, not built. Listed here rather than in the feature set above so this
-README describes what the code does today.
-
-- **Dynamic analysis** — emulator-based behavioural tracing
-- **VirusTotal cross-check** — multi-engine validation of verdicts
-- **CERT-In alert feed** — cross-reference against government fraud advisories
-- **PDF export** — one-click threat report for CISO review
-- **Probability calibration** — isotonic regression, with a reliability diagram
-- **Larger, current corpus** — the single biggest lever on real-world accuracy
-- **Two-tier deployment** — high-recall screening into human review, plus a
-  separate high-precision threshold for automated action
-
----
-
-## Project structure
+## Project Structure
 
 ```
 APKGuard/
-├── decompiler.py       Module 1 — APKTool + JADX, feature extraction
-├── classifier.py       Module 2 — XGBoost scoring
-├── llm_explainer.py    Module 3 — Ollama explanations
-├── api.py              Module 4 — FastAPI backend
-├── evaluate.py         Cross-validation, thresholds, base-rate analysis
-├── dashboard/          Module 5 — React front end
-├── tools/              APKTool, JADX
-├── models/             Trained model + feature columns
-├── data/               Training dataset
-├── uploads/            Uploaded APKs
-└── output/             Per-APK analysis reports (JSON)
+├── server.ts                       Express server: upload streaming, rate limiting & API routes
+├── src/
+│   ├── analyzer.ts                 Static extraction engine, Drebin vector attribution & GenAI logic
+│   ├── types/
+│   │   └── index.ts                TypeScript interfaces for reports, manifests, jobs & metrics
+│   ├── lib/
+│   │   ├── api.ts                  Front-end API client with single-query reports fetching
+│   │   ├── store.ts                Zustand state store with SSR-safe persistence
+│   │   └── mockData.ts             Pre-seeded specimen dossiers (Banking Trojan, Torch, Calculator)
+│   ├── components/
+│   │   ├── dashboard/              Scan history, statistics, specimen cards, file upload
+│   │   ├── layout/                 Navbar with health monitoring, footer, breadcrumbs
+│   │   └── ui/                     RiskGauge, Badge, Toast notifications, Modal dialogs
+│   └── pages/
+│       ├── LandingPage.tsx         Platform overview, feature architecture, specimen selector
+│       ├── DashboardPage.tsx       Active threat overview, triage queues & historical scans
+│       ├── AnalysisPage.tsx        Live static analysis pipeline execution & telemetry
+│       └── ReportDetailPage.tsx    Full threat dossier: CISO briefing, Drebin vectors & manifest
+├── package.json                    Dependencies & build scripts
+├── vite.config.ts                  Vite bundler configuration
+└── metadata.json                   Platform metadata
 ```
 
 ---
 
-## Author
+## Getting Started
 
-**Arsh Sharma** — IPS Academy, Indore
-[arsharma9966@gmail.com](mailto:arsharma9966@gmail.com)
+### Prerequisites
+- Node.js 18.x or higher
+- npm 9.x or higher
+- Gemini API Key (`GEMINI_API_KEY`) for AI Threat Intelligence (optional; falls back to offline analysis if omitted)
 
-Built for the PSB Cybersecurity, Fraud & AI Hackathon 2026.
+### Installation
+```bash
+# Clone the repository
+git clone https://github.com/your-org/apkguard.git
+cd apkguard
 
-## Licence
+# Install dependencies
+npm install
+```
 
-MIT
+### Environment Configuration
+Create a `.env` file in the project root:
+```env
+PORT=3000
+GEMINI_API_KEY=your_gemini_api_key_here
+```
+
+### Development Server
+```bash
+npm run dev
+```
+The server will start at `http://localhost:3000` with the API and Vite dev middleware integrated.
+
+### Production Build
+```bash
+npm run build
+npm run start
+```
+
+---
+
+## API Reference
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/health` | Service health status and engine readiness |
+| `GET` | `/stats` | Aggregate system metrics (scans, threats, severity breakdown) |
+| `GET` | `/reports` | Complete list of all analyzed APK threat reports |
+| `GET` | `/report/:apk_name` | Full threat dossier for a specific APK specimen |
+| `DELETE` | `/report/:apk_name` | Remove a threat report from memory |
+| `POST` | `/analyse` | Upload `.apk` binary for full static analysis and GenAI briefing |
+| `POST` | `/quick-score` | Upload `.apk` binary for fast static feature scoring (skips GenAI) |
+| `GET` | `/job/:job_id` | Check status, progress, and telemetry logs for a running analysis job |
+| `POST` | `/job/:job_id/cancel` | Abort a running pipeline execution |
+
+---
+
+## Author & Acknowledgements
+
+**APKGuard Engineering Team**
+Built for high-assurance mobile threat triage and banking fraud defense.
+Licensed under the [MIT License](LICENSE).

@@ -17,6 +17,7 @@ export interface ManifestData {
   activities: string[];
   services: string[];
   receivers: string[];
+  providers?: string[];
 }
 
 export interface StaticAnalysis {
